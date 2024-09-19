@@ -1,0 +1,1231 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Sample solution to implement Relationship-based Access Control (ReBAC) with Amazon Verified Permissions and Amazon Neptune'
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: avp-rebac-blog-vpc
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: avp-rebac-blog-igw
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  PublicSubnetOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: avp-rebac-blog-public-subnet-1
+
+  PublicSubnetTwo:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: avp-rebac-blog-public-subnet-2
+
+  PrivateSubnetOne:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.11.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: avp-rebac-blog-private-subnet-1
+
+  PrivateSubnetTwo:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.12.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: avp-rebac-blog-private-subnet-2
+
+  NatGatewayEIP:
+    Type: 'AWS::EC2::EIP'
+    DependsOn: InternetGateway
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: 'AWS::EC2::NatGateway'
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnetOne
+      Tags:
+        - Key: Name
+          Value: avp-rebac-blog-natgw
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: Public Route Table
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetOneRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetOne
+      
+  PublicSubnetTwoRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetTwo
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: Private Route Table
+
+  DefaultPrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnetOneRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnetOne
+
+  PrivateSubnetTwoRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnetTwo
+
+  PrivateSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: avp-rebac-blog-private-sg
+      GroupDescription: Security group for private subnet
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+  
+  PrivateSGIngressFromPrivateSG:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref PrivateSecurityGroup
+      Description: Allow all TCP traffic from itself
+      IpProtocol: tcp
+      FromPort: 0
+      ToPort: 65535
+      SourceSecurityGroupId: !Ref PrivateSecurityGroup
+
+# Amazon Neptune
+  NeptuneDBSubnetGroup:
+    Type: 'AWS::Neptune::DBSubnetGroup'
+    Properties:
+      DBSubnetGroupDescription: Neptune DB Subnet Group
+      SubnetIds:
+        - !Ref PrivateSubnetOne
+        - !Ref PrivateSubnetTwo
+
+  NeptuneDBCluster:
+    Type: 'AWS::Neptune::DBCluster'
+    Properties:
+      AvailabilityZones:
+        - !Select [1, !GetAZs '']
+      DBClusterIdentifier: avp-rebac-blog-cluster
+      EngineVersion: "1.3.2.1"
+      DBSubnetGroupName: !Ref NeptuneDBSubnetGroup
+      VpcSecurityGroupIds:
+        - !GetAtt PrivateSecurityGroup.GroupId
+      ServerlessScalingConfiguration:
+        MinCapacity: 1
+        MaxCapacity: 4
+      StorageEncrypted: true
+
+  NeptuneDBInstance:
+    Type: 'AWS::Neptune::DBInstance'
+    Properties:
+      DBInstanceClass: db.serverless
+      DBClusterIdentifier: !Ref NeptuneDBCluster
+      DBInstanceIdentifier: avp-rebac-blog-instance-1
+      AvailabilityZone: !Select [1, !GetAZs '']
+
+# SageMaker Notebook for Amazon Neptune
+  SageMakerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "AWSNeptuneNotebookRole-${AWS::StackName}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - sagemaker.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: !Sub "AWSNeptuneNotebookPolicy-${AWS::StackName}"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                  - "s3:ListBucket"
+                Resource:
+                  - !Sub "arn:aws:s3:::aws-neptune-notebook-${AWS::Region}"
+                  - !Sub "arn:aws:s3:::aws-neptune-notebook-${AWS::Region}/*"
+              - Effect: Allow
+                Action: 
+                  - "neptune-db:ReadData*"
+                  - "neptune-db:GetData*"
+                  - "neptune-db:DeleteData*"
+                Resource:
+                  - !Sub "arn:aws:neptune-db:${AWS::Region}:${AWS::AccountId}:${NeptuneDBCluster}/*"
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource:
+                  - "arn:aws:logs:*:*:log-group:/aws/sagemaker/*"
+
+  SageMakerNotebookforNeptune:
+    Type: AWS::SageMaker::NotebookInstance
+    Properties:
+      NotebookInstanceName: "aws-neptune-avp-rebac-blog"
+      InstanceType: "ml.t3.xlarge"
+      KmsKeyId: !Ref SageMakerNotebookKmsKey
+      DirectInternetAccess: "Enabled"
+      RootAccess: "Disabled"
+      RoleArn: !GetAtt SageMakerExecutionRole.Arn
+      SecurityGroupIds: 
+        - !Ref PrivateSecurityGroup
+      SubnetId: !Ref PrivateSubnetTwo
+      LifecycleConfigName: !GetAtt SageMakerLifecycleConfig.NotebookInstanceLifecycleConfigName
+      Tags:
+        - Key: aws-neptune-cluster-id
+          Value: !Ref NeptuneDBCluster
+        - Key: aws-neptune-resource-id
+          Value: !GetAtt NeptuneDBCluster.ClusterResourceId
+              
+  SageMakerLifecycleConfig:
+      Type: AWS::SageMaker::NotebookInstanceLifecycleConfig
+      Properties:
+        OnStart:
+          - Content:
+              Fn::Base64: !Sub |
+                #!/bin/bash
+                sudo -u ec2-user -i << 'EOF'
+                echo 'export GRAPH_NOTEBOOK_AUTH_MODE=DEFAULT' >> ~/.bashrc
+                echo 'export GRAPH_NOTEBOOK_SSL=True' >> ~/.bashrc
+                echo 'export GRAPH_NOTEBOOK_HOST=${NeptuneDBCluster.Endpoint}' >> ~/.bashrc
+                echo 'export GRAPH_NOTEBOOK_PORT=8182' >> ~/.bashrc
+                echo "export GRAPH_NOTEBOOK_SERVICE=neptune-db" >> ~/.bashrc
+                echo 'export NEPTUNE_LOAD_FROM_S3_ROLE_ARN=' >> ~/.bashrc
+                echo 'export AWS_REGION=${AWS::Region}' >> ~/.bashrc
+                aws s3 cp s3://aws-neptune-notebook-${AWS::Region}/graph_notebook.tar.gz /tmp/graph_notebook.tar.gz
+                rm -rf /tmp/graph_notebook
+                tar -zxvf /tmp/graph_notebook.tar.gz -C /tmp
+                /tmp/graph_notebook/install.sh
+                EOF
+
+# Cognito User Pool
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: admin_only
+            Priority: 1
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      MfaConfiguration: "OFF"
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 6
+          RequireLowercase: false
+          RequireNumbers: false
+          RequireSymbols: false
+          RequireUppercase: false
+          TemporaryPasswordValidityDays: 7
+      UsernameConfiguration:
+        CaseSensitive: false
+      VerificationMessageTemplate:
+        DefaultEmailOption: CONFIRM_WITH_CODE
+        EmailMessage: The verification code to your new account is {####}
+        EmailSubject: Verify your new account
+        SmsMessage: The verification code to your new account is {####}
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Join ["", ["avp", !Ref AWS::AccountId]]
+      UserPoolId: !Ref UserPool
+
+  UserPoolResourceServer:
+    Type: AWS::Cognito::UserPoolResourceServer
+    Properties:
+      Identifier: PetVideosAppResourceServer
+      Name: PetVideosAppResourceServer
+      UserPoolId:
+        Ref: UserPool
+      Scopes:
+        - ScopeDescription: Access to the PetVideosApp API
+          ScopeName: PetVideosAppApi
+
+  UserPoolClientLoginPage:
+    Type: "AWS::Cognito::UserPoolClient"
+    Properties:
+      ClientName: LoginPage
+      ExplicitAuthFlows:
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - profile
+        - email
+        - openid
+        - Fn::Join:
+            - ""
+            - - Ref: UserPoolResourceServer
+              - /PetVideosAppApi
+      CallbackURLs:
+        - Fn::Join:
+            - ""
+            - - https://
+              - Ref: Api
+              - !Sub ".execute-api.${AWS::Region}."
+              - Ref: AWS::URLSuffix
+              - /
+              - Ref: ApiDeploymentStageprod
+              - /login
+      UserPoolId: !Ref UserPool
+      GenerateSecret: true
+    DependsOn:
+        - ApiDeploymentStageprod
+
+# Amazon Verified Permissions
+  PetVideosAppPolicyStore:
+    Type: AWS::VerifiedPermissions::PolicyStore
+    Properties:
+      Description: "PetVideosApp"
+      ValidationSettings:
+        Mode: STRICT
+      Schema:
+        CedarJson: "{\"PetVideosApp\":{\"entityTypes\":{\"Video\":{\"memberOfTypes\":[\"Directory\"],\"shape\":{\"type\":\"Record\",\"attributes\":{\"owner\":{\"required\":false,\"element\":{\"type\":\"Entity\",\"name\":\"User\"},\"type\":\"Set\"},\"isPublic\":{\"type\":\"Boolean\",\"required\":false}}}},\"User\":{\"memberOfTypes\":[],\"shape\":{\"attributes\":{},\"type\":\"Record\"}},\"Directory\":{\"memberOfTypes\":[\"Directory\"],\"shape\":{\"type\":\"Record\",\"attributes\":{\"owner\":{\"element\":{\"type\":\"Entity\",\"name\":\"User\"},\"required\":false,\"type\":\"Set\"},\"isPublic\":{\"type\":\"Boolean\",\"required\":false}}}}},\"actions\":{\"CreateDirectory\":{\"memberOf\":[{\"id\":\"OwnerActions\"}],\"appliesTo\":{\"resourceTypes\":[\"Directory\"],\"principalTypes\":[\"User\"],\"context\":{\"attributes\":{\"owner\":{\"element\":{\"type\":\"Entity\",\"name\":\"User\"},\"required\":false,\"type\":\"Set\"}},\"type\":\"Record\"}}},\"OwnerActions\":{\"memberOf\":[],\"appliesTo\":{\"resourceTypes\":[],\"principalTypes\":[],\"context\":{\"type\":\"Record\",\"attributes\":{}}}},\"CreateVideo\":{\"appliesTo\":{\"context\":{\"type\":\"Record\",\"attributes\":{\"owner\":{\"required\":false,\"element\":{\"name\":\"User\",\"type\":\"Entity\"},\"type\":\"Set\"}}},\"resourceTypes\":[\"Video\"],\"principalTypes\":[\"User\"]},\"memberOf\":[{\"id\":\"OwnerActions\"}]},\"UpdateDirectory\":{\"memberOf\":[{\"id\":\"OwnerActions\"}],\"appliesTo\":{\"resourceTypes\":[\"Directory\"],\"context\":{\"type\":\"Record\",\"attributes\":{\"owner\":{\"required\":false,\"type\":\"Set\",\"element\":{\"name\":\"User\",\"type\":\"Entity\"}}}},\"principalTypes\":[\"User\"]}},\"ViewVideo\":{\"memberOf\":[{\"id\":\"PublicActions\"},{\"id\":\"OwnerActions\"}],\"appliesTo\":{\"context\":{\"attributes\":{\"owner\":{\"required\":false,\"element\":{\"type\":\"Entity\",\"name\":\"User\"},\"type\":\"Set\"}},\"type\":\"Record\"},\"resourceTypes\":[\"Video\"],\"principalTypes\":[\"User\"]}},\"PublicActions\":{\"memberOf\":[],\"appliesTo\":{\"resourceTypes\":[],\"context\":{\"attributes\":{},\"type\":\"Record\"},\"principalTypes\":[]}},\"DeleteVideo\":{\"memberOf\":[{\"id\":\"OwnerActions\"}],\"appliesTo\":{\"resourceTypes\":[\"Video\"],\"context\":{\"type\":\"Record\",\"attributes\":{\"owner\":{\"element\":{\"name\":\"User\",\"type\":\"Entity\"},\"required\":false,\"type\":\"Set\"}}},\"principalTypes\":[\"User\"]}},\"UpdateVideo\":{\"memberOf\":[{\"id\":\"OwnerActions\"}],\"appliesTo\":{\"resourceTypes\":[\"Video\"],\"context\":{\"type\":\"Record\",\"attributes\":{\"owner\":{\"element\":{\"name\":\"User\",\"type\":\"Entity\"},\"type\":\"Set\",\"required\":false}}},\"principalTypes\":[\"User\"]}},\"DeleteDirectory\":{\"appliesTo\":{\"resourceTypes\":[\"Directory\"],\"principalTypes\":[\"User\"],\"context\":{\"attributes\":{\"owner\":{\"required\":false,\"element\":{\"name\":\"User\",\"type\":\"Entity\"},\"type\":\"Set\"}},\"type\":\"Record\"}},\"memberOf\":[{\"id\":\"OwnerActions\"}]},\"ViewDirectory\":{\"appliesTo\":{\"principalTypes\":[\"User\"],\"resourceTypes\":[\"Directory\"],\"context\":{\"attributes\":{\"owner\":{\"type\":\"Set\",\"element\":{\"type\":\"Entity\",\"name\":\"User\"},\"required\":false}},\"type\":\"Record\"}},\"memberOf\":[{\"id\":\"PublicActions\"},{\"id\":\"OwnerActions\"}]}}}}"
+
+  PetVideosAppUserOwnerPolicy:
+    Type: AWS::VerifiedPermissions::Policy
+    Properties:
+      PolicyStoreId: !Ref PetVideosAppPolicyStore
+      Definition:
+        Static: 
+          Description: "Resource owner and related persons can access the resources"
+          Statement: 
+            !Sub
+              - "permit( principal, action in [PetVideosApp::Action::\"OwnerActions\"], resource in PetVideosApp::Directory::\"${PetVideosDirectoryId}\") when { resource has owner && principal in resource.owner };"
+              - PetVideosDirectoryId: !GetAtt BootstrapNeptuneCluster.PetVideosDirectoryId
+    DependsOn:
+        - BootstrapNeptuneCluster
+
+  PetVideosAppPublicPolicy:
+    Type: AWS::VerifiedPermissions::Policy
+    Properties:
+      PolicyStoreId: !Ref PetVideosAppPolicyStore
+      Definition:
+        Static: 
+          Description: "Allow public access to the resources"
+          Statement:
+            !Sub
+              - "permit( principal, action in [PetVideosApp::Action::\"PublicActions\"], resource in PetVideosApp::Directory::\"${PetVideosDirectoryId}\") when { resource has isPublic && resource.isPublic == true };"
+              - PetVideosDirectoryId: !GetAtt BootstrapNeptuneCluster.PetVideosDirectoryId
+
+  PetVideosAppIdentitySource:
+    Type: AWS::VerifiedPermissions::IdentitySource
+    Properties:
+      Configuration: 
+          CognitoUserPoolConfiguration:
+            ClientIds:
+              - !Ref UserPoolClientLoginPage
+            UserPoolArn: !GetAtt UserPool.Arn
+      PolicyStoreId: !Ref PetVideosAppPolicyStore
+      PrincipalEntityType: PetVideosApp::User
+
+# Bootstrap Lambda
+  BootstrapLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-PetVideosAppBootstrapLambda-role"
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+        Version: "2012-10-17"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-PetVideosAppBootstrapLambda-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "cognito-idp:AdminCreateUser"
+                  - "cognito-idp:AdminSetUserPassword"
+                Resource: !GetAtt UserPool.Arn
+  
+  BootstrapLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: avp-rebac-blog-PetVideosAppBootstrapLambda
+      ReservedConcurrentExecutions: 2
+      Role: !GetAtt
+        - BootstrapLambdaRole
+        - Arn
+      Runtime: python3.9
+      Code:
+        S3Bucket: !Sub "securityblog-avp-rebac-henryho-${AWS::Region}"
+        S3Key: avp-rebac-bootstraplambda.zip
+      Environment:
+        Variables:
+          NEPTUNE_ENDPOINT: !GetAtt NeptuneDBCluster.Endpoint
+          NEPTUNE_PORT: !GetAtt NeptuneDBCluster.Port
+          USER_POOL_ID: !Ref UserPool
+      Handler: main.handler
+      MemorySize: 1024
+      Timeout: 300
+      VpcConfig:
+        SecurityGroupIds:
+          - !GetAtt PrivateSecurityGroup.GroupId
+        SubnetIds:
+          - !Ref PrivateSubnetOne
+          - !Ref PrivateSubnetTwo
+    DependsOn:
+      - BootstrapLambdaRole
+
+# Bootstrap the Neptune cluster
+  BootstrapNeptuneCluster:
+    Type: Custom::BootstrapNeptuneCluster
+    Properties:
+      ServiceToken: !GetAtt BootstrapLambda.Arn
+      ServiceTimout: 900
+    DependsOn:
+      - NeptuneDBCluster
+      - NeptuneDBInstance
+
+# API Lambda
+  ApiLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-PetVideosAppApiLambda-role"
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+        Version: "2012-10-17"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-PetVideosAppApiLambda-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - verifiedpermissions:IsAuthorizedWithToken
+                Resource: !GetAtt PetVideosAppPolicyStore.Arn
+  
+  ApiLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: avp-rebac-blog-PetVideosAppApiLambda
+      ReservedConcurrentExecutions: 10
+      Role: !GetAtt
+        - ApiLambdaRole
+        - Arn
+      Runtime: python3.9
+      Code:
+        S3Bucket: !Sub "securityblog-avp-rebac-henryho-${AWS::Region}"
+        S3Key: avp-rebac-apilambda.zip
+      Environment:
+        Variables:
+          POLICY_STORE_ID: !Ref PetVideosAppPolicyStore
+          NEPTUNE_ENDPOINT: !GetAtt NeptuneDBCluster.Endpoint
+          NEPTUNE_PORT: !GetAtt NeptuneDBCluster.Port
+      Handler: main.handler
+      MemorySize: 1024
+      Timeout: 180
+      VpcConfig:
+        SecurityGroupIds:
+          - !GetAtt PrivateSecurityGroup.GroupId
+        SubnetIds:
+          - !Ref PrivateSubnetOne
+          - !Ref PrivateSubnetTwo
+    DependsOn:
+      - ApiLambdaRole
+
+  ApiLambdaInvoke:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Fn::GetAtt:
+          - ApiLambda
+          - Arn
+      Principal: apigateway.amazonaws.com
+
+# LoginPage lambda
+  LoginPageRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-PetVideosAppLoginPageLambda-role"
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+        Version: "2012-10-17"
+      ManagedPolicyArns:
+        - Fn::Join:
+            - ""
+            - - "arn:"
+              - Ref: AWS::Partition
+              - :iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  LoginPageLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: avp-rebac-blog-PetVideosAppLoginPageLambda
+      Role: !GetAtt
+        - LoginPageRole
+        - Arn
+      Runtime: nodejs20.x
+      Code:
+        S3Bucket: !Sub "securityblog-avp-rebac-henryho-${AWS::Region}"
+        S3Key: "avp-rebac-loginlambda.zip"
+      Handler: index.handler
+      MemorySize: 1024
+      Timeout: 30
+    DependsOn:
+      - LoginPageRole
+
+  LoginPageLambdaBackendPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Fn::GetAtt:
+          - LoginPageLambda
+          - Arn
+      Principal: apigateway.amazonaws.com
+    DependsOn:
+      - LoginPageLambda
+
+# RetrieveCognitoSecrets lambda
+  RetrieveCognitoSecretsIAMRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-RetrieveCognitoSecretsPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "cognito-idp:ListUserPoolClients"
+                  - "cognito-idp:DescribeUserPoolClient"
+                Resource: !GetAtt UserPool.Arn
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+
+  RetrieveCognitoSecretsLambda:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: avp-rebac-blog-RetrieveCognitoSecrets
+      ReservedConcurrentExecutions: 1
+      Role: !GetAtt RetrieveCognitoSecretsIAMRole.Arn
+      Runtime: python3.12
+      Code:
+        S3Bucket: !Sub "securityblog-avp-rebac-henryho-${AWS::Region}"
+        S3Key: "avp-rebac-retrievecognitosecretslambda.zip"
+      Handler: handler.lambda_handler
+      MemorySize: 128
+      Timeout: 30
+
+  RetrieveCognitoSecretsLoginPage:
+    Type: "Custom::retrievecognitosecretsloginpage"
+    Properties:
+      ServiceToken: !GetAtt
+        - RetrieveCognitoSecretsLambda
+        - Arn
+      cupid: !Ref UserPool
+      ClientId: !Ref UserPoolClientLoginPage
+
+# RetrieveCognitoSecrets Lambda
+  SetCognitoClientAndLambdaVariablesRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-CognitoSetCognitoClient"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "cognito-idp:UpdateUserPoolClient"
+                Resource: !GetAtt UserPool.Arn
+        - PolicyName: !Sub "${AWS::StackName}-LambdaSetVariable"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "lambda:UpdateFunctionConfiguration"
+                Resource: !GetAtt LoginPageLambda.Arn
+        - PolicyName: !Sub "${AWS::StackName}-AVPSetPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "verifiedpermissions:CreatePolicy"
+                Resource: !GetAtt PetVideosAppPolicyStore.Arn
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+    DependsOn:
+      - UserPool
+
+  SetCognitoClientAndLambdaVariablesLambda:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: avp-rebac-blog-SetCognitoClientAndLambdaVariables
+      Timeout: 900
+      ReservedConcurrentExecutions: 2
+      Role: !GetAtt
+        - SetCognitoClientAndLambdaVariablesRole
+        - Arn
+      Runtime: python3.12
+      Code:
+        S3Bucket: !Sub "securityblog-avp-rebac-henryho-${AWS::Region}"
+        S3Key: "avp-rebac-helperlambda.zip"
+      Handler: handler.lambda_handler
+
+  SetCognitoClientAndLambdaVariables:
+    Type: "Custom::SetCognitoClientAndLambdaVariables"
+    Properties:
+      ServiceToken: !GetAtt SetCognitoClientAndLambdaVariablesLambda.Arn
+      ClientID: !Ref UserPoolClientLoginPage
+      cupid: !Ref UserPool
+      LoginURL:
+        Fn::Join:
+          - ""
+          - - https://
+            - Ref: Api
+            - !Sub ".execute-api.${AWS::Region}."
+            - Ref: AWS::URLSuffix
+            - /
+            - Ref: ApiDeploymentStageprod
+            - /login
+      LambdaName: avp-rebac-blog-PetVideosAppLoginPageLambda
+      CUP_CLIENT_ID: !Ref UserPoolClientLoginPage
+      CUP_CLIENT_SECRET: !GetAtt
+        - RetrieveCognitoSecretsLoginPage
+        - ClientSecret
+      CUP_DOMAIN: 
+        Fn::Join:
+          - ""
+          - - avp
+            - !Sub ${AWS::AccountId}
+            - !Sub ".auth.${AWS::Region}.amazoncognito.com"
+    DependsOn:
+      - RetrieveCognitoSecretsLoginPage
+      - SetCognitoClientAndLambdaVariablesLambda
+      - Api
+      - UserPoolClientLoginPage
+      - UserPool
+      - LoginPageLambda
+      - ApiDeploymentStageprod
+
+# API Gateway
+  Api:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: PetVideosAppApi
+      Description: PetVideosApp API
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+  
+  ApiCloudWatchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+        Version: "2012-10-17"
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+  
+  ApiAccount:
+    Type: AWS::ApiGateway::Account
+    Properties:
+      CloudWatchRoleArn: !GetAtt ApiCloudWatchRole.Arn
+    DependsOn:
+      - Api
+
+  CognitoAuthorizer:
+    Type: AWS::ApiGateway::Authorizer
+    Properties:
+      Name: CognitoAuthorizer
+      RestApiId:
+        Ref: Api
+      Type: COGNITO_USER_POOLS
+      IdentitySource: method.request.header.Authorization
+      ProviderARNs: 
+        - !GetAtt UserPool.Arn
+          
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId:
+        Ref: Api
+      Description: Automatically created by the RestApi construct
+    DependsOn:
+      - ApiOPTIONS
+      - Apidirectory
+      - ApidirectoryOPTIONS
+      - Apidirectoryget
+      - ApidirectorygetOPTIONS
+      - ApidirectorygetGET
+      - Apivideo
+      - ApivideoOPTIONS
+      - Apivideoget
+      - ApivideogetOPTIONS
+      - ApivideogetGET
+      - Apilogin
+      - ApiloginOPTIONS
+      - ApiloginGET
+      - Apilist
+      - ApilistOPTIONS
+      - Apilistdirectory
+      - ApilistdirectoryOPTIONS
+      - ApilistdirectoryGET
+      - Apilistvideo
+      - ApilistvideoOPTIONS
+      - ApilistvideoGET
+
+  ApiDeploymentStageprod:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref Api
+      DeploymentId: !Ref ApiDeployment
+      StageName: prod
+    DependsOn:
+      - ApiAccount
+
+  ApiOPTIONS:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: OPTIONS
+      ResourceId: !GetAtt Api.RootResourceId
+      RestApiId: !Ref Api
+      AuthorizationType: NONE
+      Integration:
+        IntegrationResponses:
+          - ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'OPTIONS,GET,PUT,POST,DELETE,PATCH,HEAD'"
+            StatusCode: "204"
+        RequestTemplates:
+          application/json: "{ statusCode: 200 }"
+        Type: MOCK
+      MethodResponses:
+        - ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+          StatusCode: "204"
+
+  Apidirectory:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt Api.RootResourceId
+      PathPart: directory
+      RestApiId: !Ref Api
+
+  ApidirectoryOPTIONS:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: OPTIONS
+      ResourceId: !Ref Apidirectory
+      RestApiId: !Ref Api
+      AuthorizationType: NONE
+      Integration:
+        IntegrationResponses:
+          - ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'OPTIONS,GET,PUT,POST,DELETE,PATCH,HEAD'"
+            StatusCode: "204"
+        RequestTemplates:
+          application/json: "{ statusCode: 200 }"
+        Type: MOCK
+      MethodResponses:
+        - ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+          StatusCode: "204"
+
+  Apidirectoryget:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !Ref Apidirectory
+      PathPart: get
+      RestApiId: !Ref Api
+
+  ApidirectorygetOPTIONS:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: OPTIONS
+      ResourceId:
+        Ref: Apidirectoryget
+      RestApiId:
+        Ref: Api
+      AuthorizationType: NONE
+      Integration:
+        IntegrationResponses:
+          - ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'OPTIONS,GET,PUT,POST,DELETE,PATCH,HEAD'"
+            StatusCode: "204"
+        RequestTemplates:
+          application/json: "{ statusCode: 200 }"
+        Type: MOCK
+      MethodResponses:
+        - ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+          StatusCode: "204"
+
+  ApidirectorygetGET:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: GET
+      ResourceId:
+        Ref: Apidirectoryget
+      RestApiId:
+        Ref: Api
+      AuthorizationScopes:
+        - PetVideosAppResourceServer/PetVideosAppApi
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizer
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ApiLambda.Arn}/invocations
+
+  Apivideo:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt Api.RootResourceId
+      PathPart: video
+      RestApiId: !Ref Api
+
+  ApivideoOPTIONS:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: OPTIONS
+      ResourceId: !Ref Apivideo
+      RestApiId: !Ref Api
+      AuthorizationType: NONE
+      Integration:
+        IntegrationResponses:
+          - ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'OPTIONS,GET,PUT,POST,DELETE,PATCH,HEAD'"
+            StatusCode: "204"
+        RequestTemplates:
+          application/json: "{ statusCode: 200 }"
+        Type: MOCK
+      MethodResponses:
+        - ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+          StatusCode: "204"
+
+  Apivideoget:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !Ref Apivideo
+      PathPart: get
+      RestApiId: !Ref Api
+
+  ApivideogetOPTIONS:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: OPTIONS
+      ResourceId:
+        Ref: Apivideoget
+      RestApiId:
+        Ref: Api
+      AuthorizationType: NONE
+      Integration:
+        IntegrationResponses:
+          - ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'OPTIONS,GET,PUT,POST,DELETE,PATCH,HEAD'"
+            StatusCode: "204"
+        RequestTemplates:
+          application/json: "{ statusCode: 200 }"
+        Type: MOCK
+      MethodResponses:
+        - ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+          StatusCode: "204"
+
+  ApivideogetGET:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: GET
+      ResourceId:
+        Ref: Apivideoget
+      RestApiId:
+        Ref: Api
+      AuthorizationScopes:
+        - PetVideosAppResourceServer/PetVideosAppApi
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizer
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ApiLambda.Arn}/invocations
+
+  Apilogin:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt Api.RootResourceId
+      PathPart: login
+      RestApiId: !Ref Api
+
+  ApiloginOPTIONS:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: OPTIONS
+      ResourceId: !Ref Apilogin
+      RestApiId: !Ref Api
+      AuthorizationType: NONE
+      Integration:
+        IntegrationResponses:
+          - ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'OPTIONS,GET,PUT,POST,DELETE,PATCH,HEAD'"
+            StatusCode: "204"
+        RequestTemplates:
+          application/json: "{ statusCode: 200 }"
+        Type: MOCK
+      MethodResponses:
+        - ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+          StatusCode: "204"
+
+  ApiloginGET:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: GET
+      ResourceId: !Ref Apilogin
+      RestApiId: !Ref Api
+      AuthorizationType: NONE
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LoginPageLambda.Arn}/invocations
+
+  Apilist:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt Api.RootResourceId
+      PathPart: list
+      RestApiId: !Ref Api
+
+  ApilistOPTIONS:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: OPTIONS
+      ResourceId: !Ref Apilist
+      RestApiId: !Ref Api
+      AuthorizationType: NONE
+      Integration:
+        IntegrationResponses:
+          - ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'OPTIONS,GET,PUT,POST,DELETE,PATCH,HEAD'"
+            StatusCode: "204"
+        RequestTemplates:
+          application/json: "{ statusCode: 200 }"
+        Type: MOCK
+      MethodResponses:
+        - ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+          StatusCode: "204"
+
+  Apilistdirectory:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !Ref Apilist
+      PathPart: directory
+      RestApiId: !Ref Api
+
+  ApilistdirectoryOPTIONS:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: OPTIONS
+      ResourceId:
+        Ref: Apilistdirectory
+      RestApiId:
+        Ref: Api
+      AuthorizationType: NONE
+      Integration:
+        IntegrationResponses:
+          - ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'OPTIONS,GET,PUT,POST,DELETE,PATCH,HEAD'"
+            StatusCode: "204"
+        RequestTemplates:
+          application/json: "{ statusCode: 200 }"
+        Type: MOCK
+      MethodResponses:
+        - ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+          StatusCode: "204"
+
+  ApilistdirectoryGET:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: GET
+      ResourceId:
+        Ref: Apilistdirectory
+      RestApiId:
+        Ref: Api
+      AuthorizationScopes:
+        - PetVideosAppResourceServer/PetVideosAppApi
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizer
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ApiLambda.Arn}/invocations
+
+  Apilistvideo:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !Ref Apilist
+      PathPart: video
+      RestApiId: !Ref Api
+
+  ApilistvideoOPTIONS:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: OPTIONS
+      ResourceId:
+        Ref: Apilistvideo
+      RestApiId:
+        Ref: Api
+      AuthorizationType: NONE
+      Integration:
+        IntegrationResponses:
+          - ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'OPTIONS,GET,PUT,POST,DELETE,PATCH,HEAD'"
+            StatusCode: "204"
+        RequestTemplates:
+          application/json: "{ statusCode: 200 }"
+        Type: MOCK
+      MethodResponses:
+        - ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+          StatusCode: "204"
+
+  ApilistvideoGET:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: GET
+      ResourceId:
+        Ref: Apilistvideo
+      RestApiId:
+        Ref: Api
+      AuthorizationScopes:
+        - PetVideosAppResourceServer/PetVideosAppApi
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizer
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ApiLambda.Arn}/invocations
+
+  SageMakerNotebookKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for SageMaker notebook encryption
+      KeyPolicy:
+        Version: "2012-10-17"
+        Id: 'key-policy-1'
+        Statement:
+          - Sid: 'Enable IAM User Permissions'
+            Effect: 'Allow'
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: 'Allow use of the key for SageMaker'
+            Effect: 'Allow'
+            Principal:
+              Service: 'sagemaker.amazonaws.com'
+            Action:
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:DescribeKey'
+            Resource: '*'
+      EnableKeyRotation: true
+      KeyUsage: 'ENCRYPT_DECRYPT'
+      KeySpec: 'SYMMETRIC_DEFAULT'
+
+  SageMakerKMSKeyAlias:
+    Type: 'AWS::KMS::Alias'
+    Properties:
+      AliasName: 'alias/sagemaker-notebook-key'
+      TargetKeyId: !Ref SageMakerNotebookKmsKey
+
+Outputs:
+  ApiEndpoint:
+    Value:
+      Fn::Join:
+        - ""
+        - - https://
+          - Ref: Api
+          - !Sub ".execute-api.${AWS::Region}."
+          - Ref: AWS::URLSuffix
+          - /
+          - Ref: ApiDeploymentStageprod
+          - /
+
+  LoginPage:
+    Value:
+      Fn::Join:
+        - ""
+        - - https://
+          - Ref: Api
+          - !Sub ".execute-api.${AWS::Region}."
+          - Ref: AWS::URLSuffix
+          - /
+          - Ref: ApiDeploymentStageprod
+          - /login
+
+  CognitoUserPoolId:
+    Value: !Ref UserPool
+
+  CognitoUserPoolAppClientId:
+    Value: !Ref UserPoolClientLoginPage
+
+  VerifiedPermissionsPolicyStore:
+    Value: !Ref PetVideosAppPolicyStore
+
+  PasswordforCognitoUsers:
+    Value: "Password123!"
