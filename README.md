@@ -169,16 +169,16 @@ when {
 4. Open your terminal, export the ApiEndpoint, access token and ID token for `alice`, `bob`, and `charlie` as variables with the below:
 
 ```
-export WS_API_ENDPOINT=<ApiEndpoint>
+export API_ENDPOINT=<ApiEndpoint>
 
-export WS_ACCESS_TOKEN_ALICE=<access token for alice>
-export WS_ID_TOKEN_ALICE=<id token for alice>
+export ACCESS_TOKEN_ALICE=<access token for alice>
+export ID_TOKEN_ALICE=<id token for alice>
 
-export WS_ACCESS_TOKEN_BOB=<access token for bob>
-export WS_ID_TOKEN_BOB=<id token for bob>
+export ACCESS_TOKEN_BOB=<access token for bob>
+export ID_TOKEN_BOB=<id token for bob>
 
-export WS_ACCESS_TOKEN_CHARLIE=<access token for charlie>
-export WS_ID_TOKEN_CHARLIE=<id token for charlie>
+export ACCESS_TOKEN_CHARLIE=<access token for charlie>
+export ID_TOKEN_CHARLIE=<id token for charlie>
 ```
 
 ### Access Amazon API Gateway with access tokens and ID tokens
@@ -186,7 +186,7 @@ export WS_ID_TOKEN_CHARLIE=<id token for charlie>
 First, to test an authenticated user accessing their own resources, access the video `aliceCatVideo.mp4` with the `ViewVideo` API, and using the access token and ID token of `alice`. It is expected to be successful with the Cedar policy `Resource owner and related persons can access the resources`.
 
 ```
-curl -X GET "$WS_API_ENDPOINT/video/get?videoName=aliceCatVideo.mp4" -H "Authorization: Bearer $WS_ACCESS_TOKEN_ALICE" -H "ID-Token: $WS_ID_TOKEN_ALICE" | jq
+curl -X GET "$API_ENDPOINT/video/get?videoName=aliceCatVideo.mp4" -H "Authorization: Bearer $ACCESS_TOKEN_ALICE" -H "ID-Token: $ID_TOKEN_ALICE" | jq
 ```
 
 The application Lambda function constructs the below authorization request to Amazon Verified Permissions, and sends logs to [Amazon CloudWatch](https://aws.amazon.com/cloudwatch/). You may examine the authorization request in the CloudWatch Log Group of the application Lambda function. An example of authorization requests made to Amazon Verified Permissions is shown below.
@@ -267,7 +267,7 @@ The below response was returned from the application, showing access was allowed
 Now, to test an authenticated user accessing others’ resources, access the video `aliceCatVideo.mp4` with the `ViewVideo` API, and using the access token and ID token of `bob`.
 
 ```
-curl -X GET "$WS_API_ENDPOINT/video/get?videoName=aliceCatVideo.mp4" -H "Authorization: Bearer $WS_ACCESS_TOKEN_BOB" -H "ID-Token: $WS_ID_TOKEN_BOB" | jq
+curl -X GET "$API_ENDPOINT/video/get?videoName=aliceCatVideo.mp4" -H "Authorization: Bearer $ACCESS_TOKEN_BOB" -H "ID-Token: $ID_TOKEN_BOB" | jq
 ```
 
 It was expected to fail as `bob` had no direct or inherited `OWNER` relationship with the video `aliceCatVideo.mp4`.
@@ -281,7 +281,7 @@ It was expected to fail as `bob` had no direct or inherited `OWNER` relationship
 Finally, to test the inherited `OWNER` relationship between user `charlie` and video `aliceCatVideo.mp4`, access the video `aliceCatVideo.mp4` with the `ViewVideo` API, and using the access token and ID token of `charlie`.
 
 ```
-curl -X GET "$WS_API_ENDPOINT/video/get?videoName=aliceCatVideo.mp4" -H "Authorization: Bearer $WS_ACCESS_TOKEN_CHARLIE" -H "ID-Token: $WS_ID_TOKEN_CHARLIE" | jq
+curl -X GET "$API_ENDPOINT/video/get?videoName=aliceCatVideo.mp4" -H "Authorization: Bearer $ACCESS_TOKEN_CHARLIE" -H "ID-Token: $ID_TOKEN_CHARLIE" | jq
 ```
 
 It was expected to be successful. This relationship inheritance was discovered through traversing the relationship graph from `aliceCatVideo.mp4` along to the root directory `petVideosDirectory`.
@@ -317,7 +317,7 @@ g.V().hasLabel('video').has('name','bobDogVideo.mp4').values('isPublic')
 The below authorization request was made to Verified Permissions using principal `alice` after we had set the `isPublic` property of video resource `bobDogVideo.mp4`.
 
 ```
-curl -X GET "$WS_API_ENDPOINT/video/get?videoName=bobDogVideo.mp4" -H "Authorization: Bearer $WS_ACCESS_TOKEN_ALICE" -H "ID-Token: $WS_ID_TOKEN_ALICE" | jq
+curl -X GET "$API_ENDPOINT/video/get?videoName=bobDogVideo.mp4" -H "Authorization: Bearer $ACCESS_TOKEN_ALICE" -H "ID-Token: $ID_TOKEN_ALICE" | jq
 ```
 
 The following was the authorization request made to Verified Permissions with the above command. In the entities field, there was an attribute `isPublic` with `true` as the value. With reference to the Cedar policy `Allow public access to the resources`, the below authorization request was an `ALLOW`.
