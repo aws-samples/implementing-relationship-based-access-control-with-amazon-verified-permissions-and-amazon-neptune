@@ -19,7 +19,6 @@ from crhelper import CfnResource
 
 helper = CfnResource()
 
-
 @helper.create
 def create(event, _):
     client_id = event["ResourceProperties"]["ClientID"]
