@@ -15,7 +15,6 @@
 # SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import os, logging, boto3, uuid
-from crhelper import CfnResource
 from gremlin_python import statics
 from gremlin_python.structure.graph import Graph
 from gremlin_python.process.graph_traversal import __
@@ -23,7 +22,6 @@ from gremlin_python.process.strategies import *
 from gremlin_python.driver.driver_remote_connection import DriverRemoteConnection
 
 logger = logging.getLogger(__name__)
-helper = CfnResource(json_logging=True, log_level='DEBUG', boto_level='CRITICAL')
 
 # Generate directory IDs
 petVideosDir_id = str(uuid.uuid4())
@@ -37,9 +35,10 @@ bobDogVideo_id = str(uuid.uuid4())
 user_pool_id = os.environ['USER_POOL_ID']
 neptune_endpoint = os.environ['NEPTUNE_ENDPOINT']
 neptune_port = os.environ['NEPTUNE_PORT']
+policy_store_id = os.environ['POLICY_STORE_ID']
 
-@helper.create
-def create(event, _):
+def handler(event, context):
+    verifiedpermissions = boto3.client('verifiedpermissions')
     try:
         # Creating Cognito users "Alice", "Bob" and "Charlie"
         alice_id = create_cognito_user('alice', user_pool_id)
@@ -79,18 +78,31 @@ def create(event, _):
 
         # Close the connection
         remote_connection.close()
-        helper.Data["PetVideosDirectoryId"] = petVideosDir_id
-        logger.info("The solution is successfully bootstrapped.")
-    
+
+        # Create Cedar policies in Verified Permissions policy store
+        response = verifiedpermissions.create_policy(
+            policyStoreId = policy_store_id,
+            definition = {
+                'static': {
+                    'description': 'Resource owner and related persons can access the resources',
+                    'statement': f"permit( principal, action in [PetVideosApp::Action::\"OwnerActions\"], resource in PetVideosApp::Directory::\"{petVideosDir_id}\") when {{ resource has owner && principal in resource.owner }};"
+                }
+            }
+        )
+        response = verifiedpermissions.create_policy(
+            policyStoreId = policy_store_id,
+            definition = {
+                'static': {
+                    'description': 'Allow public access to the resources',
+                    'statement': f"permit( principal, action in [PetVideosApp::Action::\"PublicActions\"], resource in PetVideosApp::Directory::\"{petVideosDir_id}\") when {{ resource has isPublic && resource.isPublic == true }};"
+                }
+            }
+        )
+        print("The solution is successfully bootstrapped.")
     except Exception as e:
         logger.error(f"An error occurred while bootstrapping the solution: {str(e)}")
         raise
-
-@helper.update
-@helper.delete
-def delete(event, _):
-    return "SUCCESS"
-
+    
 def create_cognito_user(username, user_pool_id):
     cognito_idp = boto3.client('cognito-idp')
     try:
@@ -100,7 +112,6 @@ def create_cognito_user(username, user_pool_id):
             TemporaryPassword='TempPassword123!',
             MessageAction='SUPPRESS'
         )
-        
         # Extract the "sub" attribute from the response
         sub = next(attr['Value'] for attr in response['User']['Attributes'] if attr['Name'] == 'sub')
         avp_username_id = f"{user_pool_id}|{sub}"
@@ -117,6 +128,3 @@ def create_cognito_user(username, user_pool_id):
     except Exception as e:
         print(f"Error setting permanent password for user {username}: {str(e)}")
     return avp_username_id
-
-def handler(event, context):
-    helper(event, context)
