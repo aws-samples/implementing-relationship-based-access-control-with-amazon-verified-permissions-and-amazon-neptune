@@ -155,6 +155,8 @@ when {
     resource.isPublic == true }; 
 ```
 
+The blog post ["How to Implement Relationship-based Access Control with Amazon Verified Permissions and Amazon Neptune"] has provided some guidelines and considerations for desiging your policies and queries for a ReBAC application.
+
 ### Obtain access tokens and ID tokens for each user
 
 1. First go to the CloudFormation console, on the stack Outputs tab, find the below values:
@@ -183,7 +185,7 @@ export ID_TOKEN_CHARLIE=<id token for charlie>
 
 ### Access Amazon API Gateway with access tokens and ID tokens
 
-First, to test an authenticated user accessing their own resources, access the video `aliceCatVideo.mp4` with the `ViewVideo` API, and using the access token and ID token of `alice`. It is expected to be successful with the Cedar policy `Resource owner and related persons can access the resources`.
+First, to test an authenticated user accessing their own resources, access the video `aliceCatVideo.mp4` with the `ViewVideo` API in your terminal, and using the access token and ID token of `alice`. It is expected to be successful with the Cedar policy `Resource owner and related persons can access the resources`.
 
 ```
 curl -X GET "$API_ENDPOINT/video/get?videoName=aliceCatVideo.mp4" -H "Authorization: Bearer $ACCESS_TOKEN_ALICE" -H "ID-Token: $ID_TOKEN_ALICE" | jq
@@ -248,15 +250,15 @@ The application Lambda function constructs the below authorization request to Am
 ```
 
 There are several things to take note in the above authorization request:
-- **identityToken**: When using Cognito as the identity store with Verified Permissions, access tokens or ID tokens can be used as the principal to make authorization requests. User entities are mapped into the format of `<user pool ID>|<sub>` in Verified Permissions.
-- **action**: This authorization request was made against the action `ViewVideo`.
-- **resource**: This authorization request was made against a specific video ID.
+- **identityToken**: When using Cognito as the identity store with Verified Permissions, access token or ID token can be used as the principal to make authorization requests. User entities are mapped into the format of `<user pool ID>|<sub>` in Verified Permissions.
+- **action**: This authorization request is made against the action `ViewVideo`.
+- **resource**: This authorization request is made against a specific video ID.
 - **entities**: 
-  - Two owner IDs, which denote `alice` and `charlie`, were returned by traversing the relationship graph in Neptune. Both IDs were included as `owner` attribute, showing the direct and inherited `OWNER` relationship between the principals and resources.
-  - There was a static attribute `isPublic` set as `false` for this video resource, which denotes it was a private video.
-  - The resource hierarchy of this video resource was shown by including the parent directories `petVideosDirectory` and `aliceVideosDirectory` as the parent entities.
+  - Two owner IDs, which denote `alice` and `charlie`, are returned by traversing the relationship graph in Neptune. Both IDs are included as `owner` attribute, showing the direct and inherited `OWNER` relationship between the principals and resources.
+  - There is a static attribute `isPublic` set as `false` for this video resource, which denotes it is a private video.
+  - The resource hierarchy of this video resource is shown by including the parent directories `petVideosDirectory` and `aliceVideosDirectory` as the parent entities.
 
-The below response was returned from the application, showing access was allowed with the determining policy ID, which matched the Cedar policy ID of `Resource owner and related persons can access the resources`.
+The below response is returned from the application, showing access is allowed with the determining policy ID, which matched the Cedar policy ID of `<Resource owner and related persons can access the resources>`.
 
 ```
 {
@@ -270,7 +272,7 @@ Now, to test an authenticated user accessing others’ resources, access the vid
 curl -X GET "$API_ENDPOINT/video/get?videoName=aliceCatVideo.mp4" -H "Authorization: Bearer $ACCESS_TOKEN_BOB" -H "ID-Token: $ID_TOKEN_BOB" | jq
 ```
 
-It was expected to fail as `bob` had no direct or inherited `OWNER` relationship with the video `aliceCatVideo.mp4`.
+It is expected to fail as `bob` had no direct or inherited `OWNER` relationship with the video `aliceCatVideo.mp4`.
 
 ```
 {
@@ -284,7 +286,7 @@ Finally, to test the inherited `OWNER` relationship between user `charlie` and v
 curl -X GET "$API_ENDPOINT/video/get?videoName=aliceCatVideo.mp4" -H "Authorization: Bearer $ACCESS_TOKEN_CHARLIE" -H "ID-Token: $ID_TOKEN_CHARLIE" | jq
 ```
 
-It was expected to be successful. This relationship inheritance was discovered through traversing the relationship graph from `aliceCatVideo.mp4` along to the root directory `petVideosDirectory`.
+It is expected to be successful. This relationship inheritance is discovered through traversing the relationship graph from `aliceCatVideo.mp4` along to the permission boundary, in thie case, the root directory `petVideosDirectory`.
 
 ```
 {
@@ -307,20 +309,20 @@ Now you can use the following Gremlin query to modify the static property `isPub
 g.V().hasLabel('video').has('name','bobDogVideo.mp4').property(single,'isPublic',true)
 ```
 
-You may verify the property's value of `isPublic` of `bobDogVideo.mp4` with the below Gremlin query.
+You can verify the value of property `isPublic` of `bobDogVideo.mp4` with the following Gremlin query.
 
 ```
 # Verify the value of property "isPublic" of a specific video
 g.V().hasLabel('video').has('name','bobDogVideo.mp4').values('isPublic')
 ```
 
-The below authorization request was made to Verified Permissions using principal `alice` after we had set the `isPublic` property of video resource `bobDogVideo.mp4`.
+The below authorization request is made to Verified Permissions using principal `alice` after we have set the `isPublic` property of video resource `bobDogVideo.mp4`. Please note that `alice` has no direct or inherited `OWNER` relationship to the resource `bobDogVideo.mp4`.
 
 ```
 curl -X GET "$API_ENDPOINT/video/get?videoName=bobDogVideo.mp4" -H "Authorization: Bearer $ACCESS_TOKEN_ALICE" -H "ID-Token: $ID_TOKEN_ALICE" | jq
 ```
 
-The following was the authorization request made to Verified Permissions with the above command. In the entities field, there was an attribute `isPublic` with `true` as the value. With reference to the Cedar policy `Allow public access to the resources`, the below authorization request was an `ALLOW`.
+The following authorization request is made to Verified Permissions using principal `alice` after you have set the `isPublic` property of video resource `bobDogVideo.mp4`. In the entities field, there is the attribute `isPublic` with `true` as the value. With reference to the Cedar policy `<Allow public access to the resources>`, the following authorization request returns `ALLOW`. 
 
 ```
 {
