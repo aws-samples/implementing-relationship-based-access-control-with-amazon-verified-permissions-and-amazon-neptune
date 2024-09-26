@@ -361,32 +361,6 @@ Resources:
       Schema:
         CedarJson: "{\"PetVideosApp\":{\"entityTypes\":{\"Video\":{\"memberOfTypes\":[\"Directory\"],\"shape\":{\"type\":\"Record\",\"attributes\":{\"owner\":{\"required\":false,\"element\":{\"type\":\"Entity\",\"name\":\"User\"},\"type\":\"Set\"},\"isPublic\":{\"type\":\"Boolean\",\"required\":false}}}},\"User\":{\"memberOfTypes\":[],\"shape\":{\"attributes\":{},\"type\":\"Record\"}},\"Directory\":{\"memberOfTypes\":[\"Directory\"],\"shape\":{\"type\":\"Record\",\"attributes\":{\"owner\":{\"element\":{\"type\":\"Entity\",\"name\":\"User\"},\"required\":false,\"type\":\"Set\"},\"isPublic\":{\"type\":\"Boolean\",\"required\":false}}}}},\"actions\":{\"CreateDirectory\":{\"memberOf\":[{\"id\":\"OwnerActions\"}],\"appliesTo\":{\"resourceTypes\":[\"Directory\"],\"principalTypes\":[\"User\"],\"context\":{\"attributes\":{\"owner\":{\"element\":{\"type\":\"Entity\",\"name\":\"User\"},\"required\":false,\"type\":\"Set\"}},\"type\":\"Record\"}}},\"OwnerActions\":{\"memberOf\":[],\"appliesTo\":{\"resourceTypes\":[],\"principalTypes\":[],\"context\":{\"type\":\"Record\",\"attributes\":{}}}},\"CreateVideo\":{\"appliesTo\":{\"context\":{\"type\":\"Record\",\"attributes\":{\"owner\":{\"required\":false,\"element\":{\"name\":\"User\",\"type\":\"Entity\"},\"type\":\"Set\"}}},\"resourceTypes\":[\"Video\"],\"principalTypes\":[\"User\"]},\"memberOf\":[{\"id\":\"OwnerActions\"}]},\"UpdateDirectory\":{\"memberOf\":[{\"id\":\"OwnerActions\"}],\"appliesTo\":{\"resourceTypes\":[\"Directory\"],\"context\":{\"type\":\"Record\",\"attributes\":{\"owner\":{\"required\":false,\"type\":\"Set\",\"element\":{\"name\":\"User\",\"type\":\"Entity\"}}}},\"principalTypes\":[\"User\"]}},\"ViewVideo\":{\"memberOf\":[{\"id\":\"PublicActions\"},{\"id\":\"OwnerActions\"}],\"appliesTo\":{\"context\":{\"attributes\":{\"owner\":{\"required\":false,\"element\":{\"type\":\"Entity\",\"name\":\"User\"},\"type\":\"Set\"}},\"type\":\"Record\"},\"resourceTypes\":[\"Video\"],\"principalTypes\":[\"User\"]}},\"PublicActions\":{\"memberOf\":[],\"appliesTo\":{\"resourceTypes\":[],\"context\":{\"attributes\":{},\"type\":\"Record\"},\"principalTypes\":[]}},\"DeleteVideo\":{\"memberOf\":[{\"id\":\"OwnerActions\"}],\"appliesTo\":{\"resourceTypes\":[\"Video\"],\"context\":{\"type\":\"Record\",\"attributes\":{\"owner\":{\"element\":{\"name\":\"User\",\"type\":\"Entity\"},\"required\":false,\"type\":\"Set\"}}},\"principalTypes\":[\"User\"]}},\"UpdateVideo\":{\"memberOf\":[{\"id\":\"OwnerActions\"}],\"appliesTo\":{\"resourceTypes\":[\"Video\"],\"context\":{\"type\":\"Record\",\"attributes\":{\"owner\":{\"element\":{\"name\":\"User\",\"type\":\"Entity\"},\"type\":\"Set\",\"required\":false}}},\"principalTypes\":[\"User\"]}},\"DeleteDirectory\":{\"appliesTo\":{\"resourceTypes\":[\"Directory\"],\"principalTypes\":[\"User\"],\"context\":{\"attributes\":{\"owner\":{\"required\":false,\"element\":{\"name\":\"User\",\"type\":\"Entity\"},\"type\":\"Set\"}},\"type\":\"Record\"}},\"memberOf\":[{\"id\":\"OwnerActions\"}]},\"ViewDirectory\":{\"appliesTo\":{\"principalTypes\":[\"User\"],\"resourceTypes\":[\"Directory\"],\"context\":{\"attributes\":{\"owner\":{\"type\":\"Set\",\"element\":{\"type\":\"Entity\",\"name\":\"User\"},\"required\":false}},\"type\":\"Record\"}},\"memberOf\":[{\"id\":\"PublicActions\"},{\"id\":\"OwnerActions\"}]}}}}"
 
-  PetVideosAppUserOwnerPolicy:
-    Type: AWS::VerifiedPermissions::Policy
-    Properties:
-      PolicyStoreId: !Ref PetVideosAppPolicyStore
-      Definition:
-        Static: 
-          Description: "Resource owner and related persons can access the resources"
-          Statement: 
-            !Sub
-              - "permit( principal, action in [PetVideosApp::Action::\"OwnerActions\"], resource in PetVideosApp::Directory::\"${PetVideosDirectoryId}\") when { resource has owner && principal in resource.owner };"
-              - PetVideosDirectoryId: !GetAtt BootstrapNeptuneCluster.PetVideosDirectoryId
-    DependsOn:
-        - BootstrapNeptuneCluster
-
-  PetVideosAppPublicPolicy:
-    Type: AWS::VerifiedPermissions::Policy
-    Properties:
-      PolicyStoreId: !Ref PetVideosAppPolicyStore
-      Definition:
-        Static: 
-          Description: "Allow public access to the resources"
-          Statement:
-            !Sub
-              - "permit( principal, action in [PetVideosApp::Action::\"PublicActions\"], resource in PetVideosApp::Directory::\"${PetVideosDirectoryId}\") when { resource has isPublic && resource.isPublic == true };"
-              - PetVideosDirectoryId: !GetAtt BootstrapNeptuneCluster.PetVideosDirectoryId
-
   PetVideosAppIdentitySource:
     Type: AWS::VerifiedPermissions::IdentitySource
     Properties:
@@ -414,7 +388,7 @@ Resources:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
       Policies:
-        - PolicyName: !Sub "${AWS::StackName}-PetVideosAppBootstrapLambda-policy"
+        - PolicyName: !Sub "${AWS::StackName}-PetVideosAppBootstrapLambda-policy" 
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -423,6 +397,10 @@ Resources:
                   - "cognito-idp:AdminCreateUser"
                   - "cognito-idp:AdminSetUserPassword"
                 Resource: !GetAtt UserPool.Arn
+              - Effect: Allow
+                Action:
+                  - "verifiedpermissions:CreatePolicy"
+                Resource: !GetAtt PetVideosAppPolicyStore.Arn
   
   BootstrapLambda:
     Type: AWS::Lambda::Function
@@ -434,13 +412,14 @@ Resources:
         - Arn
       Runtime: python3.9
       Code:
-        S3Bucket: !Sub "securityblog-avp-rebac-henryho-${AWS::Region}"
-        S3Key: avp-rebac-bootstraplambda.zip
+        S3Bucket: aws-security-blog-content
+        S3Key: public/sample/2504-implement-relationship-based-access-control-amazon-verified-permissions-amazon-neptune/avp-rebac-bootstraplambda.zip
       Environment:
         Variables:
           NEPTUNE_ENDPOINT: !GetAtt NeptuneDBCluster.Endpoint
           NEPTUNE_PORT: !GetAtt NeptuneDBCluster.Port
           USER_POOL_ID: !Ref UserPool
+          POLICY_STORE_ID: !GetAtt PetVideosAppPolicyStore.PolicyStoreId
       Handler: main.handler
       MemorySize: 1024
       Timeout: 300
@@ -452,16 +431,6 @@ Resources:
           - !Ref PrivateSubnetTwo
     DependsOn:
       - BootstrapLambdaRole
-
-# Bootstrap the Neptune cluster
-  BootstrapNeptuneCluster:
-    Type: Custom::BootstrapNeptuneCluster
-    Properties:
-      ServiceToken: !GetAtt BootstrapLambda.Arn
-      ServiceTimout: 900
-    DependsOn:
-      - NeptuneDBCluster
-      - NeptuneDBInstance
 
 # API Lambda
   ApiLambdaRole:
@@ -498,11 +467,11 @@ Resources:
         - Arn
       Runtime: python3.9
       Code:
-        S3Bucket: !Sub "securityblog-avp-rebac-henryho-${AWS::Region}"
-        S3Key: avp-rebac-apilambda.zip
+        S3Bucket: aws-security-blog-content
+        S3Key: public/sample/2504-implement-relationship-based-access-control-amazon-verified-permissions-amazon-neptune/avp-rebac-apilambda.zip
       Environment:
         Variables:
-          POLICY_STORE_ID: !Ref PetVideosAppPolicyStore
+          POLICY_STORE_ID: !GetAtt PetVideosAppPolicyStore.PolicyStoreId
           NEPTUNE_ENDPOINT: !GetAtt NeptuneDBCluster.Endpoint
           NEPTUNE_PORT: !GetAtt NeptuneDBCluster.Port
       Handler: main.handler
@@ -555,8 +524,8 @@ Resources:
         - Arn
       Runtime: nodejs20.x
       Code:
-        S3Bucket: !Sub "securityblog-avp-rebac-henryho-${AWS::Region}"
-        S3Key: "avp-rebac-loginlambda.zip"
+        S3Bucket: aws-security-blog-content
+        S3Key: public/sample/2504-implement-relationship-based-access-control-amazon-verified-permissions-amazon-neptune/avp-rebac-loginlambda.zip
       Handler: index.handler
       MemorySize: 1024
       Timeout: 30
@@ -575,7 +544,7 @@ Resources:
     DependsOn:
       - LoginPageLambda
 
-# RetrieveCognitoSecrets lambda
+# RetrieveCognitoSecrets Lambda
   RetrieveCognitoSecretsIAMRole:
     Type: "AWS::IAM::Role"
     Properties:
@@ -609,8 +578,8 @@ Resources:
       Role: !GetAtt RetrieveCognitoSecretsIAMRole.Arn
       Runtime: python3.12
       Code:
-        S3Bucket: !Sub "securityblog-avp-rebac-henryho-${AWS::Region}"
-        S3Key: "avp-rebac-retrievecognitosecretslambda.zip"
+        S3Bucket: aws-security-blog-content
+        S3Key: public/sample/2504-implement-relationship-based-access-control-amazon-verified-permissions-amazon-neptune/avp-rebac-retrievecognitosecretslambda.zip
       Handler: handler.lambda_handler
       MemorySize: 128
       Timeout: 30
@@ -678,8 +647,8 @@ Resources:
         - Arn
       Runtime: python3.12
       Code:
-        S3Bucket: !Sub "securityblog-avp-rebac-henryho-${AWS::Region}"
-        S3Key: "avp-rebac-helperlambda.zip"
+        S3Bucket: aws-security-blog-content
+        S3Key: public/sample/2504-implement-relationship-based-access-control-amazon-verified-permissions-amazon-neptune/avp-rebac-helperlambda.zip
       Handler: handler.lambda_handler
 
   SetCognitoClientAndLambdaVariables:

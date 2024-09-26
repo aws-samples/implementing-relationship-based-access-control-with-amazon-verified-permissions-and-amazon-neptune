@@ -1,4 +1,4 @@
-# How to Implement Relationship-based Access Control with Amazon Verified Permissions and Amazon Neptune
+# How to implement relationship-based access control with Amazon Verified Permissions and Amazon Neptune
 
 ## Introduction
 
@@ -43,7 +43,7 @@ To complete this solution, make sure you meet the following prerequisites:
 ## Deployment on AWS
 
 1.  Sign in to your AWS account.
-2.  Navigate to an AWS Region (for example, `us-east-2`).
+2.  Navigate to `us-east-1` region.
 3.  Download the CloudFormation template file [here](/cloudformation-template/avp-rebac-blog-template.yaml).
 4.	Upload the CloudFormation template file in the [CloudFormation create stack page](https://console.aws.amazon.com/cloudformation/home#/stacks/create/template) to deploy the solution.
 5.	Enter a name for the CloudFormation stack (for example `aws-blog-avp-rebac`).
@@ -52,7 +52,7 @@ To complete this solution, make sure you meet the following prerequisites:
 
 ## Walkthrough
 
-### Create Lambda Layer for AWS Lambda functions
+### Create Lambda Layer for AWS Lambda functions and bootstrap the solution
 
 Before walking through the solution, package `gremlinpython 3.7.2` as a Lambda Layer for Lambda functions. A Lambda layer is a .zip file archive that contains supplementary code or data. Layers usually contain library dependencies, a custom runtime, or configuration files. For more information about Lambda Layer, please refer to this [link](https://docs.aws.amazon.com/lambda/latest/dg/chapter-layers.html).
 
@@ -127,7 +127,15 @@ aws lambda update-function-configuration --function-name avp-rebac-blog-PetVideo
     --layers "arn:aws:lambda:us-east-1:123456789012:layer:python-requests-layer:1"
 ```
 
-### Cedar policies design
+8. Invoke the Lambda Function `avp-rebac-blog-PetVideosAppBootstrapLambda` to bootstrap the solution with the following:
+
+```
+aws lambda invoke --function-name avp-rebac-blog-PetVideosAppBootstrapLambda \
+    --cli-binary-format raw-in-base64-out \
+    response.json
+```
+
+### Review Cedar policies design
 
 Verified Permissions uses the [Cedar policy language](https://docs.aws.amazon.com/verifiedpermissions/latest/userguide/what-is-avp.html#avp-cedar) to define fine-grained permissions. The default decision for an authorization response is `DENY`. The first policy permits a principal to perform actions in the action group `OwnerActions` on resources in `petVideosDirectory` only when the same principal is included in the set of resource owners.
 
