@@ -11,8 +11,8 @@ This repository provides an [AWS CloudFormation](https://aws.amazon.com/cloudfor
 3.  [Prerequisites](#prerequisites)
 4.  [Deployment on AWS](#deployment-on-aws) 
 5.  [Walkthrough](#walkthrough)
-    - [Create Lambda Layer for AWS Lambda functions](#create-lambda-layer-for-aws-lambda-functions) 
-    - [Cedar policies design](#cedar-policies-design)
+    - [Bootstrap the solution](#bootstrap-the-solution) 
+    - [Cedar policy design](#cedar-policy-design)
     - [Obtain access tokens and ID tokens for each user](#obtain-access-tokens-and-id-tokens-for-each-user)
     - [Access Amazon API Gateway with access tokens and ID tokens](#access-amazon-api-gateway-with-access-tokens-and-id-tokens)
 6.  [Extending ReBAC’s capabilities with Attribute-based Access Control (ABAC)](#extending-rebacs-capabilities-with-attribute-based-access-control-abac)
@@ -23,14 +23,14 @@ This repository provides an [AWS CloudFormation](https://aws.amazon.com/cloudfor
 
 In this solution, relationship data is stored in Neptune. Prior to requesting an authorization decision from Verified Permissions, the application runs a Neptune query that traverses the relationship graph to retrieve the set of principals that have a specific relationship with the resource. The application then constructs an authorization request for Verified Permissions, using the results of this query to populate the entity data in the request.
 
-In the Cedar schema, the resource has an attribute, named for the relationship, that contains the set of principals that have that relationship with the resource. In our sample application, entities of type Video have an attribute called `OWNER`, which contains the set of users that have an owner relationship, directly or indirectly, with a video. Each potential relationship is represented by a distinct resource attribute and requires a dedicated query to fetch the set of principals that have that relationship. 
+In the Cedar schema, the resource has an attribute—named for the relationship—that contains the set of principals that have that relationship with the resource. In our sample application, entities of type Video have an attribute called `OWNER`, which contains the set of users that have an owner relationship, directly or indirectly, with a video. Each potential relationship is represented by a distinct resource attribute and requires a dedicated query to fetch the set of principals that have that relationship. 
 
 ![alt text](images/ArchitectureDiagram.png "Architecture Diagram")
 
 1.	The user authenticates with [Amazon Cognito](https://aws.amazon.com/cognito/) and obtains an access token and an ID token.
 2.	The user accesses the application via [Amazon API Gateway](https://aws.amazon.com/api-gateway/) with the provided token.
 3.	An application [AWS Lambda](https://aws.amazon.com/lambda) function traverses the relationship graph in Neptune and returns the set of principals that have a specific relationship with the resource.
-4.  The application Lambda function constructs the requests by putting relationship data in the entities field and passes the requests to Verified Permissions. Verified Permissions acts as the policy decision point (PDP) and evaluates Cedar policies to arrive at an authorization decision.
+4.  The application Lambda function constructs the requests by putting relationship data in the entities field and passes the requests to Verified Permissions. Verified Permissions acts as the policy decision point (PDP) and evaluates the Cedar policies to arrive at an authorization decision.
 5.  The application Lambda function acts as the policy enforcement point (PEP) to enforce the authorization decision returned by Verified Permissions by allowing or denying access to the API.
 
 ## Prerequisites
@@ -52,7 +52,7 @@ To complete this solution, make sure you meet the following prerequisites:
 
 ## Walkthrough
 
-### Create Lambda Layer for AWS Lambda functions and bootstrap the solution
+### Bootstrap the solution
 
 Before walking through the solution, package `gremlinpython 3.7.2` as a Lambda Layer for Lambda functions. A Lambda layer is a .zip file archive that contains supplementary code or data. Layers usually contain library dependencies, a custom runtime, or configuration files. For more information about Lambda Layer, please refer to this [link](https://docs.aws.amazon.com/lambda/latest/dg/chapter-layers.html).
 
@@ -81,6 +81,7 @@ chmod 744 1-install.sh && chmod 744 2-package.sh
 ```
 
 This script uses venv to create a Python virtual environment named `create-gremlinpython-layer`. It then installs all required dependencies in the `create-gremlinpython-layer/lib/python3.9/site-packages` directory.
+
 **Example 1-install.sh**
 ```
 python3.9 -m venv create-gremlinpython-layer
@@ -95,6 +96,7 @@ pip install -r requirements.txt
 ```
 
 This script copies the contents from the `create-gremlinpython-layer/lib` directory into a new directory named `python`. It then zips the contents of the `python` directory into a file named `gremlinpython-layer.zip`. This is the .zip file for your layer. You can unzip the file and verify that it contains the correct file structure, as shown in the Layer paths for Python runtimes section.
+
 **Example 2-package.sh**
 ```
 mkdir python
@@ -135,7 +137,21 @@ aws lambda invoke --function-name avp-rebac-blog-PetVideosAppBootstrapLambda \
     response.json
 ```
 
-### Review Cedar policies design
+9. Navigate to the Neptune graph notebook from your AWS console, and open JupyterLab from `Actions`. Open a new `Python 3` notebook.
+
+10. Visualize the relationship graph bootstrapped in Neptune with the following query:
+
+```
+%%gremlin -p v,oute,inv 
+
+g.V().outE().inV().path().by(elementMap('name','directoryId','videoId','ownerName','ownerId','userId','isPublic').order().by(keys))
+```
+
+The below shows the relationship graph for this sample application.
+
+![alt text](images/RelationshipGraph.png "Relationship Graph")
+
+### Cedar policy design
 
 Verified Permissions uses the [Cedar policy language](https://docs.aws.amazon.com/verifiedpermissions/latest/userguide/what-is-avp.html#avp-cedar) to define fine-grained permissions. The default decision for an authorization response is `DENY`. The first policy permits a principal to perform actions in the action group `OwnerActions` on resources in `petVideosDirectory` only when the same principal is included in the set of resource owners.
 
@@ -262,7 +278,7 @@ There are several things to take note in the above authorization request:
 - **action**: This authorization request is made against the action `ViewVideo`.
 - **resource**: This authorization request is made against a specific video ID.
 - **entities**: 
-  - Two owner IDs, which denote `alice` and `charlie`, are returned by traversing the relationship graph in Neptune. Both IDs are included as `owner` attribute, showing the direct and inherited `OWNER` relationship between the principals and resources.
+  - The entities of type `video` have an attribute named for the relationship `OWNER`. Two owner IDs, which denote `alice` and `charlie`, are returned by traversing the relationship graph in Neptune. Both IDs are included as `owner` attribute, showing the direct and inherited `OWNER` relationship between the principals and resources.
   - There is a static attribute `isPublic` set as `false` for this video resource, which denotes it is a private video.
   - The resource hierarchy of this video resource is shown by including the parent directories `petVideosDirectory` and `aliceVideosDirectory` as the parent entities.
 
