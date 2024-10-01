@@ -15,7 +15,7 @@ This repository provides an [AWS CloudFormation](https://aws.amazon.com/cloudfor
     - [Cedar policy design](#cedar-policy-design)
     - [Obtain access tokens and ID tokens for each user](#obtain-access-tokens-and-id-tokens-for-each-user)
     - [Access Amazon API Gateway with access tokens and ID tokens](#access-amazon-api-gateway-with-access-tokens-and-id-tokens)
-6.  [Extending ReBAC’s capabilities with Attribute-based Access Control (ABAC)](#extending-rebacs-capabilities-with-attribute-based-access-control-abac)
+6.  [Extending ReBAC’s capabilities with Attribute-based Access Control (ABAC)](#combining-rebac-policies-with-attribute-based-access-control-abac-policies)
 7.  [Cleaning up](#cleaning-up)
 8.  [Conclusion](#conclusion)
 
