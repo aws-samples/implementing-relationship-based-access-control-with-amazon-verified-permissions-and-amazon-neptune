@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This repository provides an [AWS CloudFormation](https://aws.amazon.com/cloudformation/) template that deploys a sample application demonstrating the implementation of Relationship-based Access Control (ReBAC) using [Amazon Verified Permissions](https://aws.amazon.com/verified-permissions/) and [Amazon Neptune](https://aws.amazon.com/neptune/), a managed, serverless graph database on AWS. For details about ReBAC, you may refer to the blog post ["How to Implement Relationship-based Access Control with Amazon Verified Permissions and Amazon Neptune"].
+This repository provides an [AWS CloudFormation](https://aws.amazon.com/cloudformation/) template that deploys a sample application demonstrating the implementation of Relationship-based Access Control (ReBAC) using [Amazon Verified Permissions](https://aws.amazon.com/verified-permissions/) and [Amazon Neptune](https://aws.amazon.com/neptune/), a managed, serverless graph database on AWS. For details about ReBAC, you may refer to the blog post ["How to Implement Relationship-based Access Control with Amazon Verified Permissions and Amazon Neptune"](https://aws.amazon.com/blogs/security/how-to-implement-relationship-based-access-control-with-amazon-verified-permissions-and-amazon-neptune/).
 
 ## Table of Content
 
@@ -179,7 +179,7 @@ when {
     resource.isPublic == true }; 
 ```
 
-The blog post ["How to Implement Relationship-based Access Control with Amazon Verified Permissions and Amazon Neptune"] has provided some guidelines and considerations for desiging your policies and queries for a ReBAC application.
+The blog post ["How to Implement Relationship-based Access Control with Amazon Verified Permissions and Amazon Neptune"](https://aws.amazon.com/blogs/security/how-to-implement-relationship-based-access-control-with-amazon-verified-permissions-and-amazon-neptune/) has provided some guidelines and considerations for desiging your policies and queries for a ReBAC application.
 
 ### Obtain access tokens and ID tokens for each user
 
